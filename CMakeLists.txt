@@ -40,6 +40,10 @@ set(wmma_object "${CMAKE_CURRENT_BINARY_DIR}/wmma_${D4R_GPU_ARCH}.hsaco")
 add_custom_command(OUTPUT "${wmma_object}"
   COMMAND "${D4R_HIP_CLANG}" -x hip --offload-arch=${D4R_GPU_ARCH}
     --offload-device-only --no-gpu-bundle-output -mno-wavefrontsize64
+    # The standalone layout-contract probe is compiled without a device header
+    # (no __shared__, so it cannot use the LDS exchange), so it keeps the gfx12
+    # layout shim. The shipped K/M kernels use the target's native layout and are
+    # validated by the K identity/nonzero gates instead.
     -nogpuinc -nogpulib -O2 -DD4R_WMMA_LAYOUT=12 "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/wmma_gfx1201.hip"
     -o "${wmma_object}"
   DEPENDS tools/windows/wmma_gfx1201.hip kernels/common/wmma_backend.h
@@ -48,11 +52,13 @@ add_custom_target(d4r_wmma_code_object ALL DEPENDS "${wmma_object}")
 # K/M objects stay in experimental/, outside the ZLUDA native override
 # directory, until each layer and then the complete network pass replay.
 # M uses the existing FP16 widening baseline; native FP8 is not enabled here.
-# The Windows K/M sources and their identity/replay gates are written against
-# the gfx12 register layout, so the layout is pinned: on gfx12 it is the native
-# layout, on gfx11 it selects wmma_layout.h's shim, which reproduces the gfx12
-# indexing through the gfx11 instruction. The native gfx11 layout compiles but
-# does not satisfy the K identity gate on gfx1101 hardware.
+# wmma_layout.h picks the target's own WMMA register layout: native gfx12 on RDNA4, native gfx11 on
+# RDNA3, so the kernels use the GPU's real fragment contract instead of the gfx12-indexing layout shim
+# (D4R_WMMA_LAYOUT=12 on a gfx11 target), which costs ~10% more instructions and 600+ permlanex16 lane
+# crossbar ops per object. The native gfx11 path used to fail the K identity gate; the cause was the
+# lane l ^ 16 exchange inside wm_op_from_acc, where wm_other_half (permlanex16) returned the lane's own
+# value and duplicated every odd K slot. That exchange now goes through LDS, and both K layers that
+# d4r_k_module_probe covers pass K_IDENTITY and K_NONZERO with the same changed_elements as gfx1201.
 set(native_objects)
 option(D4R_K_FP16_BASELINE "Round every K16 accumulation step like NVIDIA f16 WMMA" ON)
 option(D4R_M_FP16_BASELINE "Preserve M e4m3 quantisation and f16 accumulation per K32" ON)
@@ -79,7 +85,7 @@ foreach(family k m)
     add_custom_command(OUTPUT "${native_object}"
       COMMAND "${D4R_HIP_CLANG}" -x hip -std=c++17 --offload-arch=${D4R_GPU_ARCH}
         --offload-device-only --no-gpu-bundle-output -mno-wavefrontsize64
-        -nogpuinc -nogpulib -O3 -DD4R_DEVICE_ONLY_MINIMAL -DD4R_WMMA_LAYOUT=12 ${native_flags}
+        -nogpuinc -nogpulib -O3 -DD4R_DEVICE_ONLY_MINIMAL ${native_flags}
         "${source}" -o "${native_object}"
       DEPENDS "${source}" ${native_headers} kernels/common/wmma_layout.h
         kernels/common/hip_device_minimal.h VERBATIM)

@@ -150,20 +150,29 @@ WM_FN wm_op wm_op_from_acc(const wm_f16 own[8])
     uint32_t mine[4], theirs[4];
 #pragma unroll
     for (int j = 0; j < 4; ++j)
-    {
         mine[j] = wm_pack2(own[2 * j], own[2 * j + 1]);
-        theirs[j] = wm_other_half(mine[j]);
-    }
-#ifndef PWIN_NO_PERM
-    // v_perm_b32(theirs, mine): bytes 0-3 = mine, 4-7 = theirs. Even j: the low halves, odd j: the high
-    // halves, in the order (mine, theirs) for hf = 0 and (theirs, mine) for hf = 1.
-    const uint32_t sel_lo = hf ? 0x01000504u : 0x05040100u, sel_hi = hf ? 0x03020706u : 0x07060302u;
-    wm_u8v r;
+    // Lane l ^ 16 of the same wave holds the other eight accumulator rows, i.e. the other parity of
+    // the channels, so the two halves together cover all 16 K slots. Fetching them with wm_other_half
+    // (permlanex16) is not reliable for gfx11 on this toolchain: measured on an RX 7800 XT (Windows,
+    // ROCm 7.2 clang, --offload-arch=gfx1101) it returned the lane's own value, silently writing the
+    // even K slot into the odd one (the K identity gate failed with full[c] == input[c & ~1]). The
+    // exchange therefore goes through LDS, one four-dword slot per lane and one scratch region per
+    // wave of the block, with a wave barrier on either side of the read.
+    {
+        __shared__ uint32_t wm_xchg[16 * 32 * 4];
+        // Every d4r K/M launch is wave32 with blockDim.x = 32 and blockDim.y = 1, so the linear
+        // thread index is threadIdx.z * 32 + lane and the partner lane sits at tid ^ 16.
+        const uint32_t wm_tid = (uint32_t)threadIdx.z * 32u + wm_lane();
+        const uint32_t wm_source = (wm_tid ^ 16u) * 4u;
 #pragma unroll
-    for (int j = 0; j < 8; ++j)
-        r[j] = __builtin_amdgcn_perm(theirs[j >> 1], mine[j >> 1], (j & 1) ? sel_hi : sel_lo);
-    return r;
-#else
+        for (int j = 0; j < 4; ++j)
+            wm_xchg[wm_tid * 4u + j] = mine[j];
+        __builtin_amdgcn_wave_barrier();
+#pragma unroll
+        for (int j = 0; j < 4; ++j)
+            theirs[j] = wm_xchg[wm_source + j];
+        __builtin_amdgcn_wave_barrier();
+    }
     wm_u8v r;
 #pragma unroll
     for (int j = 0; j < 8; ++j)
@@ -173,7 +182,6 @@ WM_FN wm_op wm_op_from_acc(const wm_f16 own[8])
         r[j] = hf ? wm_pack2(b, a) : wm_pack2(a, b);
     }
     return r;
-#endif
 #endif
 }
 
