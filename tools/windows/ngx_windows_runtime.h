@@ -588,6 +588,7 @@ private:
             stage = std::chrono::steady_clock::now();
         };
         if (ticket) rt_->timeline->wait_ready(ticket->input); else rt_->timeline->wait_input(queue);
+        mark("input_timeline_wait");
         rt_->cuda.check(rt_->cuda.cuCtxSynchronize(), "Interop input producer completion");
         mark("input_fence_wait");
         const bool batchInputs = std::getenv("D4R_BATCH_INPUT_COPIES") != nullptr;
