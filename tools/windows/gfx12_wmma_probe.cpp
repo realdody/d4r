@@ -30,7 +30,7 @@ int main(int argc, char** argv)
         if (args.module.empty()) throw std::runtime_error("--module is required");
         HipApi hip(args.hip_root);
         hipDeviceProp_t properties{};
-        hip.select_gfx1201(args.device, properties);
+        hip.select_architecture(args.device, properties);
         hipModule_t module = nullptr;
         hip.check(hip.hipModuleLoad(&module, args.module.c_str()), "hipModuleLoad(WMMA)");
         struct ModuleCleanup {
@@ -120,8 +120,8 @@ int main(int argc, char** argv)
             }
             }
         }
-        std::printf("PASS GFX12_WMMA architecture=gfx1201 modes=raw,legacy_adapter,upstream_layout iterations=%u max_abs=%.9g max_rel=%.9g\n",
-            args.iterations, max_absolute_error, max_relative_error);
+        std::printf("PASS GFX12_WMMA architecture=%s modes=raw,legacy_adapter,upstream_layout iterations=%u max_abs=%.9g max_rel=%.9g\n",
+            HipApi::target_arch(), args.iterations, max_absolute_error, max_relative_error);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "FAIL GFX12_WMMA %s\n", error.what());

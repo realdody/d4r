@@ -42,7 +42,7 @@ int main(int argc, char** argv)
         if (args.module.empty()) throw std::runtime_error("--module is required");
         HipApi hip(args.hip_root);
         hipDeviceProp_t properties{};
-        hip.select_gfx1201(args.device, properties);
+        hip.select_architecture(args.device, properties);
         if (args.kernel_name != "enc1" && args.kernel_name != "enc2")
             throw std::runtime_error("--kernel-name must be enc1 or enc2");
         const bool enc2 = args.kernel_name == "enc2";
@@ -124,8 +124,8 @@ int main(int argc, char** argv)
                     return 5;
                 }
         }
-        std::printf("PASS K_IDENTITY architecture=gfx1201 kernel=%s iterations=%u full_elements=%zu merged_elements=%zu transformer_executed=1 nonzero_weights=0\n",
-            args.kernel_name.c_str(), args.iterations, full_elements, merged_elements);
+        std::printf("PASS K_IDENTITY architecture=%s kernel=%s iterations=%u full_elements=%zu merged_elements=%zu transformer_executed=1 nonzero_weights=0\n",
+            HipApi::target_arch(), args.kernel_name.c_str(), args.iterations, full_elements, merged_elements);
 
         // Exercise nonzero V projection, position-only attention and Wo GEMMs.
         // The generated data is saved for comparison with pwin_model.py.
@@ -213,8 +213,8 @@ int main(int argc, char** argv)
             save("full.bin", full.data(), full.size() * sizeof(uint16_t));
             save("merged.bin", merged.data(), merged.size() * sizeof(uint16_t));
         }
-        std::printf("PASS K_NONZERO architecture=gfx1201 kernel=%s changed_elements=%zu full_elements=%zu merged_elements=%zu fixture_saved=%d numerical_reference_pending=1\n",
-            args.kernel_name.c_str(), changed, full.size(), merged.size(), !args.fixture_dir.empty());
+        std::printf("PASS K_NONZERO architecture=%s kernel=%s changed_elements=%zu full_elements=%zu merged_elements=%zu fixture_saved=%d numerical_reference_pending=1\n",
+            HipApi::target_arch(), args.kernel_name.c_str(), changed, full.size(), merged.size(), !args.fixture_dir.empty());
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "FAIL K_MODULE %s\n", error.what());

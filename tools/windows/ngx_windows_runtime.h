@@ -42,7 +42,11 @@ inline std::filesystem::path pixel_module_path() {
         reinterpret_cast<LPCWSTR>(&pixel_module_path), &module)) throw std::runtime_error("Locate GPU conversion module directory");
     wchar_t path[32768]{}; const DWORD length = GetModuleFileNameW(module, path, 32768);
     if (!length || length == 32768) throw std::runtime_error("GPU conversion module path is invalid");
-    return std::filesystem::path(path).parent_path() / L"pixel_convert_gfx1201.hsaco";
+    // The code-object name carries the target architecture (CMake D4R_GPU_ARCH).
+    std::wstring name = L"pixel_convert_";
+    for (const char* c = diag::HipApi::target_arch(); *c; ++c) name.push_back(static_cast<wchar_t>(*c));
+    name += L".hsaco";
+    return std::filesystem::path(path).parent_path() / name;
 }
 
 struct Runtime {
@@ -94,7 +98,7 @@ struct Runtime {
         if (!d3d) throw std::runtime_error("Null D3D12 device");
         try {
             hipDeviceProp_t props{};
-            hip.select_gfx1201(-1, props);
+            hip.select_architecture(-1, props);
             hip.verbose = cuda.verbose = !std::getenv("D4R_QUIET_API");
             const auto luid = adapter_luid(d3d);
             if (std::memcmp(&luid, props.luid, sizeof(luid))) throw std::runtime_error("D3D12/HIP LUID mismatch");
@@ -155,7 +159,7 @@ struct Runtime {
             ngx_check(destroy(caps), "Destroy capability parameters");
             if (available != 1 || initResult != 1 || needsDriver != 0)
                 throw std::runtime_error("CUDA DLSS is unavailable after capability initialization");
-            std::printf("D4R_RUNTIME platform=Windows architecture=gfx1201 cpu_frame_copies=0 frame_age=0\n");
+            std::printf("D4R_RUNTIME platform=Windows architecture=%s cpu_frame_copies=0 frame_age=0\n", diag::HipApi::target_arch());
         } catch (...) { cleanup(); throw; }
     }
     Runtime(const Runtime&) = delete;

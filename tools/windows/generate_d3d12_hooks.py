@@ -52,8 +52,11 @@ def generate(source):
     slot = 9  # IUnknown(3), ID3D12Object(4), DeviceChild(1), CommandList(1).
     for version, interface, methods in sorted(classes):
         for result, name, arguments in methods:
-            result = ' '.join(result.split())
-            arguments = ' '.join(arguments.split())
+            # MinGW spells this D3D12 parameter type WINBOOL; the Microsoft
+            # Windows SDK only defines BOOL. Normalize so the generated header
+            # compiles with both toolchains.
+            result = ' '.join(result.split()).replace('WINBOOL', 'BOOL')
+            arguments = ' '.join(arguments.split()).replace('WINBOOL', 'BOOL')
             declarations = [arg.strip() for arg in arguments.split(',')] if arguments else []
             names = []
             for declaration in declarations:

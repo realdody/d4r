@@ -8,7 +8,7 @@ int main(int argc, char** argv) {
         Args args(argc, argv);
         HipApi hip(args.hip_root);
         hipDeviceProp_t props{};
-        hip.select_gfx1201(args.device, props);
+        hip.select_architecture(args.device, props);
         SearchDirectory search(std::filesystem::path(wide(args.cuda_dll)).parent_path());
         CudaApi cuda(args.cuda_dll);
         cuda.check(cuda.cuInit(0), "cuInit");

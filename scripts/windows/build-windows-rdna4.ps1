@@ -2,6 +2,7 @@
 param(
     [string]$HipRoot = $env:HIP_PATH,
     [ValidateSet('stable', 'therock')][string]$RuntimeProfile = 'stable',
+    [ValidateSet('gfx1100', 'gfx1101', 'gfx1102', 'gfx1103', 'gfx1200', 'gfx1201')][string]$GpuArch = 'gfx1201',
     [string]$ZludaRoot,
     [string]$ToolchainRoot,
     [string]$BuildDirectory,
@@ -47,7 +48,7 @@ if ($minhookCommit -ne 'c3fcafdc10146beb5919319d0683e44e3c30d537') {
 $originalPath = $env:PATH
 try {
     $configure = @('--fresh', '-S', $repo, '-B', $BuildDirectory, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
-        "-DCMAKE_MAKE_PROGRAM=$ninja", "-DD4R_HIP_ROOT=$HipRoot", "-DCMAKE_INSTALL_PREFIX=$InstallDirectory")
+        "-DCMAKE_MAKE_PROGRAM=$ninja", "-DD4R_HIP_ROOT=$HipRoot", "-DD4R_GPU_ARCH=$GpuArch", "-DCMAKE_INSTALL_PREFIX=$InstallDirectory")
     if ($ToolchainRoot) {
         $compiler = Join-Path $ToolchainRoot 'bin/x86_64-w64-mingw32-clang++.exe'
         if (!(Test-Path $compiler)) { throw "Compiler missing: $compiler" }

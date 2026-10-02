@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
         std::unique_ptr<HipApi> hip;
         hipDeviceProp_t props{};
         const bool no_hip = std::getenv("D4R_COMMAND_PROBE_NO_HIP") != nullptr;
-        if (!no_hip) { hip = std::make_unique<HipApi>(args.hip_root); hip->select_gfx1201(args.device, props); }
+        if (!no_hip) { hip = std::make_unique<HipApi>(args.hip_root); hip->select_architecture(args.device, props); }
         ComPtr<IDXGIFactory4> factory; dx(CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf())), "Probe DXGI");
         ComPtr<IDXGIAdapter1> adapter;
         for (UINT i = 0; ; ++i) {

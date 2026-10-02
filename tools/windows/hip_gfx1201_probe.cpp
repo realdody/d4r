@@ -9,7 +9,7 @@ int main(int argc, char** argv)
         if (args.module.empty()) throw std::runtime_error("--module is required");
         HipApi api(args.hip_root);
         hipDeviceProp_t props{};
-        api.select_gfx1201(args.device, props);
+        api.select_architecture(args.device, props);
         loaded_modules();
         size_t free = 0, total = 0;
         api.check(api.hipMemGetInfo(&free, &total), "hipMemGetInfo");
@@ -41,7 +41,7 @@ int main(int argc, char** argv)
         allocation_cleanup.p = nullptr;
         api.check(api.hipModuleUnload(module), "hipModuleUnload");
         cleanup.m = nullptr;
-        std::printf("PASS HIP architecture=gfx1201 iterations=%u guard_verified=1\n", args.iterations);
+        std::printf("PASS HIP architecture=%s iterations=%u guard_verified=1\n", HipApi::target_arch(), args.iterations);
         return 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL HIP %s\n", e.what());

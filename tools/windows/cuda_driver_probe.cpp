@@ -46,7 +46,7 @@ int main(int argc, char** argv)
         // Require the real HIP architecture, then match the CUDA device by PCI identity.
         HipApi hip(args.hip_root);
         hipDeviceProp_t props{};
-        hip.select_gfx1201(args.device, props);
+        hip.select_architecture(args.device, props);
         CudaApi api(args.cuda_dll);
         loaded_modules();
         std::printf("STAGE cuInit\n");

@@ -2,6 +2,11 @@
 #include "diagnostic.h"
 #include <hip/hip_runtime_api.h>
 
+// Architecture this executable was built for (CMake D4R_GPU_ARCH).
+#ifndef D4R_TARGET_ARCH
+#define D4R_TARGET_ARCH "gfx1201"
+#endif
+
 namespace d4r::diag {
 struct HipApi {
     bool verbose = true; // Probes log every call; the game can suppress successful API calls.
@@ -40,8 +45,12 @@ struct HipApi {
         if (verbose || result != hipSuccess) std::printf("HIP %s -> %d (%s)\n", call, static_cast<int>(result), hipGetErrorName(result));
         if (result != hipSuccess) throw std::runtime_error(std::string(call) + ": " + hipGetErrorString(result));
     }
-    int select_gfx1201(int requested, hipDeviceProp_t& selected) const {
-        // Architecture spoofing invalidates a gfx12 correctness test.
+    // Device selection is bound to the architecture this executable was built
+    // for. Substituting another GPU would invalidate every layout and kernel
+    // result, so a mismatch is a hard error.
+    static const char* target_arch() { return D4R_TARGET_ARCH; }
+    int select_architecture(int requested, hipDeviceProp_t& selected) const {
+        // Architecture spoofing invalidates a layout correctness result.
         for (const char* name : {"HSA_OVERRIDE_GFX_VERSION", "HSA_OVERRIDE_GFX_VERSION_0"})
             if (std::getenv(name)) throw std::runtime_error(std::string("Unset architecture override ") + name);
         check(hipInit(0), "hipInit");
@@ -59,14 +68,16 @@ struct HipApi {
                 i, props.name, props.gcnArchName, props.warpSize, props.totalGlobalMem,
                 props.pciDomainID, props.pciBusID, props.pciDeviceID);
             const std::string arch = props.gcnArchName;
-            if (arch.substr(0, arch.find(':')) == "gfx1201" && (requested < 0 || requested == i) && found < 0) {
+            if (arch.substr(0, arch.find(':')) == target_arch() && (requested < 0 || requested == i) && found < 0) {
                 found = i;
                 selected = props;
             }
         }
-        if (found < 0) throw std::runtime_error("No selected gfx1201 device; never substitute gfx110x");
+        if (found < 0)
+            throw std::runtime_error(std::string("No selected ") + target_arch() +
+                " device; refusing to substitute a different GPU architecture");
         check(hipSetDevice(found), "hipSetDevice");
-        std::printf("SELECTED HIP ordinal=%d architecture=gfx1201\n", found);
+        std::printf("SELECTED HIP ordinal=%d architecture=%s\n", found, target_arch());
         return found;
     }
 };

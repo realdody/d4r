@@ -34,7 +34,7 @@ int main(int argc, char** argv)
         if (dlss_path.filename() != L"nvngx_dlss.dll") throw std::runtime_error("DLSS file must be named nvngx_dlss.dll");
         HipApi hip(args.hip_root);
         hipDeviceProp_t props{};
-        hip.select_gfx1201(args.device, props);
+        hip.select_architecture(args.device, props);
         SearchDirectory cuda_search(std::filesystem::path(wide(args.cuda_dll)).parent_path());
         CudaApi cuda(args.cuda_dll);
         cuda.check(cuda.cuInit(0), "cuInit");

@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
             throw std::runtime_error("--module, --fixture-dir and --output-dir are required");
         HipApi hip(args.hip_root);
         hipDeviceProp_t props{};
-        hip.select_gfx1201(args.device, props);
+        hip.select_architecture(args.device, props);
         const std::filesystem::path input(wide(args.fixture_dir)), output(wide(args.output_dir));
         auto parameters = read_file(input / L"args.bin");
         if (parameters.empty() || parameters.size() > 4096) throw std::runtime_error("Invalid replay parameter size");

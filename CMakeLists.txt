@@ -13,27 +13,34 @@ if(NOT EXISTS "${D4R_HIP_ROOT}/include/hip/hip_runtime_api.h")
   message(FATAL_ERROR "Set D4R_HIP_ROOT to a Windows HIP SDK (headers and bin/clang++.exe required)")
 endif()
 find_program(D4R_HIP_CLANG NAMES clang++.exe PATHS "${D4R_HIP_ROOT}/bin" "${D4R_HIP_ROOT}/lib/llvm/bin" NO_DEFAULT_PATH REQUIRED)
-set(probe_object "${CMAKE_CURRENT_BINARY_DIR}/probe_gfx1201.hsaco")
+# Device target for every code object and for the probes' device selection.
+# gfx1201 (RDNA4) is the validated default; gfx1101 (RDNA3) is the port target
+# and is not hardware-validated yet.
+set(D4R_GPU_ARCH "gfx1201" CACHE STRING "AMDGPU target for the diagnostic and native code objects")
+if(NOT D4R_GPU_ARCH MATCHES "^gfx1[12][0-9][0-9]$")
+  message(FATAL_ERROR "D4R_GPU_ARCH must be a gfx11xx or gfx12xx target, for example gfx1101 or gfx1201")
+endif()
+set(probe_object "${CMAKE_CURRENT_BINARY_DIR}/probe_${D4R_GPU_ARCH}.hsaco")
 add_custom_command(OUTPUT "${probe_object}"
-  COMMAND "${D4R_HIP_CLANG}" -x hip --offload-arch=gfx1201
+  COMMAND "${D4R_HIP_CLANG}" -x hip --offload-arch=${D4R_GPU_ARCH}
     --offload-device-only --no-gpu-bundle-output -mno-wavefrontsize64
     -nogpuinc -nogpulib -O2 "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/probe_kernel.hip"
     -o "${probe_object}"
   DEPENDS tools/windows/probe_kernel.hip VERBATIM)
 add_custom_target(d4r_probe_code_object ALL DEPENDS "${probe_object}")
-set(pixel_object "${CMAKE_CURRENT_BINARY_DIR}/pixel_convert_gfx1201.hsaco")
+set(pixel_object "${CMAKE_CURRENT_BINARY_DIR}/pixel_convert_${D4R_GPU_ARCH}.hsaco")
 add_custom_command(OUTPUT "${pixel_object}"
-  COMMAND "${D4R_HIP_CLANG}" -x hip -std=c++17 --offload-arch=gfx1201
+  COMMAND "${D4R_HIP_CLANG}" -x hip -std=c++17 --offload-arch=${D4R_GPU_ARCH}
     --offload-device-only --no-gpu-bundle-output -mno-wavefrontsize64
     -nogpuinc -nogpulib -O2 "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/pixel_convert_gfx1201.hip"
     -o "${pixel_object}"
   DEPENDS tools/windows/pixel_convert_gfx1201.hip tools/windows/pixel_format.h kernels/common/hip_device_minimal.h VERBATIM)
 add_custom_target(d4r_pixel_code_object ALL DEPENDS "${pixel_object}")
-set(wmma_object "${CMAKE_CURRENT_BINARY_DIR}/wmma_gfx1201.hsaco")
+set(wmma_object "${CMAKE_CURRENT_BINARY_DIR}/wmma_${D4R_GPU_ARCH}.hsaco")
 add_custom_command(OUTPUT "${wmma_object}"
-  COMMAND "${D4R_HIP_CLANG}" -x hip --offload-arch=gfx1201
+  COMMAND "${D4R_HIP_CLANG}" -x hip --offload-arch=${D4R_GPU_ARCH}
     --offload-device-only --no-gpu-bundle-output -mno-wavefrontsize64
-    -nogpuinc -nogpulib -O2 "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/wmma_gfx1201.hip"
+    -nogpuinc -nogpulib -O2 -DD4R_WMMA_LAYOUT=12 "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/wmma_gfx1201.hip"
     -o "${wmma_object}"
   DEPENDS tools/windows/wmma_gfx1201.hip kernels/common/wmma_backend.h
     kernels/common/wmma_layout.h VERBATIM)
@@ -41,6 +48,11 @@ add_custom_target(d4r_wmma_code_object ALL DEPENDS "${wmma_object}")
 # K/M objects stay in experimental/, outside the ZLUDA native override
 # directory, until each layer and then the complete network pass replay.
 # M uses the existing FP16 widening baseline; native FP8 is not enabled here.
+# The Windows K/M sources and their identity/replay gates are written against
+# the gfx12 register layout, so the layout is pinned: on gfx12 it is the native
+# layout, on gfx11 it selects wmma_layout.h's shim, which reproduces the gfx12
+# indexing through the gfx11 instruction. The native gfx11 layout compiles but
+# does not satisfy the K identity gate on gfx1101 hardware.
 set(native_objects)
 option(D4R_K_FP16_BASELINE "Round every K16 accumulation step like NVIDIA f16 WMMA" ON)
 option(D4R_M_FP16_BASELINE "Preserve M e4m3 quantisation and f16 accumulation per K32" ON)
@@ -49,7 +61,7 @@ foreach(family k m)
   file(GLOB native_headers CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/kernels/${family}/*.h")
   foreach(source IN LISTS native_sources)
     get_filename_component(kernel_name "${source}" NAME_WE)
-    set(native_object "${CMAKE_CURRENT_BINARY_DIR}/${kernel_name}_gfx1201.hsaco")
+    set(native_object "${CMAKE_CURRENT_BINARY_DIR}/${kernel_name}_${D4R_GPU_ARCH}.hsaco")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
     file(READ "${source}" kernel_source)
     string(REGEX MATCH "// d4r-build-flags: ([^\r\n]+)" flags_line "${kernel_source}")
@@ -65,9 +77,9 @@ foreach(family k m)
       list(APPEND native_flags ${source_flags})
     endif()
     add_custom_command(OUTPUT "${native_object}"
-      COMMAND "${D4R_HIP_CLANG}" -x hip -std=c++17 --offload-arch=gfx1201
+      COMMAND "${D4R_HIP_CLANG}" -x hip -std=c++17 --offload-arch=${D4R_GPU_ARCH}
         --offload-device-only --no-gpu-bundle-output -mno-wavefrontsize64
-        -nogpuinc -nogpulib -O3 -DD4R_DEVICE_ONLY_MINIMAL ${native_flags}
+        -nogpuinc -nogpulib -O3 -DD4R_DEVICE_ONLY_MINIMAL -DD4R_WMMA_LAYOUT=12 ${native_flags}
         "${source}" -o "${native_object}"
       DEPENDS "${source}" ${native_headers} kernels/common/wmma_layout.h
         kernels/common/hip_device_minimal.h VERBATIM)
@@ -78,7 +90,8 @@ endforeach()
 add_custom_target(d4r_native_gfx1201_compile ALL DEPENDS ${native_objects})
 foreach(probe hip_gfx1201_probe gfx12_wmma_probe k_module_probe native_replay_probe cuda_driver_probe cuda_mma_probe cuda_image_probe d3d12_command_probe d3d12_pixel_probe d3d12_hip_interop_probe hip_stream_lifecycle_probe ngx_cuda_init_probe d3d12_dlss_probe)
   add_executable(d4r_${probe} tools/windows/${probe}.cpp)
-  target_compile_definitions(d4r_${probe} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__)
+  target_compile_definitions(d4r_${probe} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__
+    D4R_TARGET_ARCH="${D4R_GPU_ARCH}")
   target_include_directories(d4r_${probe} PRIVATE "${D4R_HIP_ROOT}/include")
   target_link_libraries(d4r_${probe} PRIVATE version dbghelp)
   if(MINGW)
@@ -100,7 +113,8 @@ add_subdirectory("${D4R_MINHOOK_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/minhook" EXC
 add_library(d4r_nvngx_windows SHARED tools/windows/d4r_nvngx_windows.cpp tools/windows/d3d12_command_hooks.cpp)
 add_dependencies(d4r_nvngx_windows d4r_pixel_code_object)
 set_target_properties(d4r_nvngx_windows PROPERTIES PREFIX "" OUTPUT_NAME "d4r_nvngx")
-target_compile_definitions(d4r_nvngx_windows PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__)
+target_compile_definitions(d4r_nvngx_windows PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__
+  D4R_TARGET_ARCH="${D4R_GPU_ARCH}")
 target_include_directories(d4r_nvngx_windows PRIVATE "${D4R_HIP_ROOT}/include")
 target_link_libraries(d4r_nvngx_windows PRIVATE version dbghelp d3d12 dxguid minhook)
 install(FILES "${D4R_MINHOOK_ROOT}/LICENSE.txt" DESTINATION licenses RENAME MinHook.txt)
@@ -128,7 +142,7 @@ add_library(d4r_nvapi_trace SHARED tools/windows/nvapi_trace.cpp)
 set_target_properties(d4r_nvapi_trace PROPERTIES PREFIX "" OUTPUT_NAME "nvapi64"
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/nvapi-trace"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/nvapi-trace")
-target_compile_definitions(d4r_nvapi_trace PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(d4r_nvapi_trace PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX D4R_TARGET_ARCH="${D4R_GPU_ARCH}")
 target_link_libraries(d4r_nvapi_trace PRIVATE version dbghelp)
 if(MINGW)
   target_link_options(d4r_nvapi_trace PRIVATE -static)
@@ -138,7 +152,8 @@ add_library(d4r_nvapi_compat SHARED tools/windows/nvapi_trace.cpp)
 set_target_properties(d4r_nvapi_compat PROPERTIES PREFIX "" OUTPUT_NAME "nvapi64"
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/nvapi-compat"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/nvapi-compat")
-target_compile_definitions(d4r_nvapi_compat PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__ D4R_NVAPI_COMPAT)
+target_compile_definitions(d4r_nvapi_compat PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__ D4R_NVAPI_COMPAT
+  D4R_TARGET_ARCH="${D4R_GPU_ARCH}")
 target_include_directories(d4r_nvapi_compat PRIVATE "${D4R_HIP_ROOT}/include")
 target_link_libraries(d4r_nvapi_compat PRIVATE version dbghelp)
 if(MINGW)
@@ -158,7 +173,8 @@ add_dependencies(d4r_d3d12_command_probe d4r_nvngx_windows)
 set(D4R_AGILITY_ROOT "" CACHE PATH "Optional unpacked Microsoft.Direct3D.D3D12 1.619.5 debug SDK")
 if(EXISTS "${D4R_AGILITY_ROOT}/build/native/bin/x64/d3d12SDKLayers.dll")
   add_executable(d4r_d3d12_command_debug_probe EXCLUDE_FROM_ALL tools/windows/d3d12_command_probe.cpp)
-  target_compile_definitions(d4r_d3d12_command_debug_probe PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__ D4R_DIAGNOSTIC_AGILITY)
+  target_compile_definitions(d4r_d3d12_command_debug_probe PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX __HIP_PLATFORM_AMD__ D4R_DIAGNOSTIC_AGILITY
+    D4R_TARGET_ARCH="${D4R_GPU_ARCH}")
   target_include_directories(d4r_d3d12_command_debug_probe PRIVATE "${D4R_HIP_ROOT}/include")
   target_link_libraries(d4r_d3d12_command_debug_probe PRIVATE version dbghelp d3d12 dxgi dxguid)
   if(MINGW)
@@ -218,7 +234,7 @@ set_tests_properties(gfx12_wmma PROPERTIES TIMEOUT 90 LABELS "hardware;gfx1201;w
 foreach(layer enc1 enc2)
   add_test(NAME k_${layer}_execution COMMAND d4r_k_module_probe
     --hip-root "${D4R_HIP_ROOT}"
-    --module "${CMAKE_CURRENT_BINARY_DIR}/dltss_pwin_${layer}_layer_gfx1201.hsaco"
+    --module "${CMAKE_CURRENT_BINARY_DIR}/dltss_pwin_${layer}_layer_${D4R_GPU_ARCH}.hsaco"
     --kernel-name ${layer})
   set_tests_properties(k_${layer}_execution PROPERTIES TIMEOUT 90 LABELS "hardware;gfx1201;k_execution")
 endforeach()
