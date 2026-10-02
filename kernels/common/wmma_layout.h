@@ -152,26 +152,17 @@ WM_FN wm_op wm_op_from_acc(const wm_f16 own[8])
     for (int j = 0; j < 4; ++j)
         mine[j] = wm_pack2(own[2 * j], own[2 * j + 1]);
     // Lane l ^ 16 of the same wave holds the other eight accumulator rows, i.e. the other parity of
-    // the channels, so the two halves together cover all 16 K slots. Fetching them with wm_other_half
-    // (permlanex16) is not reliable for gfx11 on this toolchain: measured on an RX 7800 XT (Windows,
-    // ROCm 7.2 clang, --offload-arch=gfx1101) it returned the lane's own value, silently writing the
-    // even K slot into the odd one (the K identity gate failed with full[c] == input[c & ~1]). The
-    // exchange therefore goes through LDS, one four-dword slot per lane and one scratch region per
-    // wave of the block, with a wave barrier on either side of the read.
+    // the channels, so the two halves together cover all 16 K slots. The exchange uses ds_bpermute:
+    // it routes the operand register through the LDS crossbar, needs no shared memory or device
+    // header, and needs no barrier. wm_other_half (permlanex16) is not usable here - measured on an
+    // RX 7800 XT (Windows, ROCm 7.2 clang, --offload-arch=gfx1101) it returned the lane's own value,
+    // which duplicated the even K slot into the odd one (the K identity gate failed with
+    // full[c] == input[c & ~1]).
     {
-        __shared__ uint32_t wm_xchg[16 * 32 * 4];
-        // Every d4r K/M launch is wave32 with blockDim.x = 32 and blockDim.y = 1, so the linear
-        // thread index is threadIdx.z * 32 + lane and the partner lane sits at tid ^ 16.
-        const uint32_t wm_tid = (uint32_t)threadIdx.z * 32u + wm_lane();
-        const uint32_t wm_source = (wm_tid ^ 16u) * 4u;
+        const uint32_t source = ((wm_lane() ^ 16u) << 2);
 #pragma unroll
         for (int j = 0; j < 4; ++j)
-            wm_xchg[wm_tid * 4u + j] = mine[j];
-        __builtin_amdgcn_wave_barrier();
-#pragma unroll
-        for (int j = 0; j < 4; ++j)
-            theirs[j] = wm_xchg[wm_source + j];
-        __builtin_amdgcn_wave_barrier();
+            theirs[j] = __builtin_amdgcn_ds_bpermute(source, mine[j]);
     }
     wm_u8v r;
 #pragma unroll

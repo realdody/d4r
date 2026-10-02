@@ -40,11 +40,7 @@ set(wmma_object "${CMAKE_CURRENT_BINARY_DIR}/wmma_${D4R_GPU_ARCH}.hsaco")
 add_custom_command(OUTPUT "${wmma_object}"
   COMMAND "${D4R_HIP_CLANG}" -x hip --offload-arch=${D4R_GPU_ARCH}
     --offload-device-only --no-gpu-bundle-output -mno-wavefrontsize64
-    # The standalone layout-contract probe is compiled without a device header
-    # (no __shared__, so it cannot use the LDS exchange), so it keeps the gfx12
-    # layout shim. The shipped K/M kernels use the target's native layout and are
-    # validated by the K identity/nonzero gates instead.
-    -nogpuinc -nogpulib -O2 -DD4R_WMMA_LAYOUT=12 "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/wmma_gfx1201.hip"
+-nogpuinc -nogpulib -O2 "${CMAKE_CURRENT_SOURCE_DIR}/tools/windows/wmma_gfx1201.hip"
     -o "${wmma_object}"
   DEPENDS tools/windows/wmma_gfx1201.hip kernels/common/wmma_backend.h
     kernels/common/wmma_layout.h VERBATIM)
